@@ -29,7 +29,7 @@ const templatePath = path.join(
 const template = fs.readFileSync(templatePath, "utf-8");
 
 export const registerUser = async (req, res) => {
-  const { name, email, password } = req.body;
+  const { email } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -37,14 +37,10 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
     const otp = authenticator.generate(uuidv4());
 
     const newUser = new User({
-      name,
       email,
-      password: hashedPassword,
-      isVerified: false,
     });
 
     await newUser.save();
@@ -75,8 +71,7 @@ export const registerUser = async (req, res) => {
   }
 };
 export const verifyOTP = async (req, res) => {
-  const { otp } = req.body;
-  const token = req.query.token;
+  const { otp, token } = req.body;
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -110,6 +105,7 @@ export const verifyOTP = async (req, res) => {
 
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
+  console.log("🚀 ~ loginUser ~ req.body:", req.body);
 
   try {
     const user = await User.findOne({ email });
@@ -125,9 +121,146 @@ export const loginUser = async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
+    console.log("🚀 ~ loginUser ~ token:", token);
     res.status(200).json({
       message: "Login successful",
       token: token,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Server error" });
+  }
+};
+
+export const resendOTP = async (req, res) => {
+  const { token } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const newOtp = authenticator.generate(uuidv4());
+
+    await OTPStore.findOneAndUpdate(
+      { email: user.email },
+      { otp: newOtp },
+      { upsert: true, new: true }
+    );
+    const emailHtml = template.replace("{{otp}}", newOtp);
+
+    await transporter.sendMail({
+      from: "matrerajesh.igenerate@gmail.com",
+      to: user.email,
+      subject: "Your Resent OTP Code",
+      text: emailHtml,
+    });
+
+    res.status(200).json({ message: "OTP resent successfully" });
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return res.status(400).json({ message: "Token expired" });
+    }
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  const token = req.headers.authorization;
+  const {
+    birthDate,
+    gender,
+    name,
+    images,
+    categorys,
+    headline,
+    bio,
+    aboutMe,
+    password,
+  } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      user.password = hashedPassword;
+    }
+    if (birthDate) user.birthDate = birthDate;
+    if (gender) user.gender = gender;
+    if (name) user.name = name;
+    if (headline) user.headline = headline;
+    if (bio) user.bio = bio;
+    if (images && Array.isArray(images)) user.images = images;
+    if (categorys && Array.isArray(categorys)) user.categorys = categorys;
+
+    if (aboutMe) {
+      const {
+        work,
+        education,
+        location,
+        homeTown,
+        lookingFor,
+        industry,
+        experience,
+        educationLevel,
+        languages,
+      } = aboutMe;
+      if (work) user.aboutMe.work = work;
+      if (education) user.aboutMe.education = education;
+      if (location) user.aboutMe.location = location;
+      if (homeTown) user.aboutMe.homeTown = homeTown;
+      if (lookingFor) user.aboutMe.lookingFor = lookingFor;
+      if (industry) user.aboutMe.industry = industry;
+      if (experience) user.aboutMe.experience = experience;
+      if (educationLevel) user.aboutMe.educationLevel = educationLevel;
+      if (languages && Array.isArray(languages))
+        user.aboutMe.languages = languages;
+    }
+
+    await user.save();
+
+    res.status(200).json({ message: "Profile updated successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Server error" });
+  }
+};
+
+const saveImage = (base64Image, imageName) => {
+  const uploadsDir = path.join(__dirname, "..", "uploads");
+
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  const imagePath = path.join(uploadsDir, imageName);
+  const imageBuffer = Buffer.from(base64Image, "base64");
+  fs.writeFileSync(imagePath, imageBuffer);
+  return imagePath;
+};
+
+export const uploadImage = async (req, res) => {
+  const { image } = req.body;
+
+  if (!image) {
+    return res.status(400).json({ message: "No image provided" });
+  }
+
+  try {
+    const imageName = `image_${Date.now()}.png`;
+    const imagePath = saveImage(image, imageName);
+
+    res.status(200).json({
+      message: "Image uploaded successfully",
+      path: imagePath,
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "Server error" });
