@@ -1,11 +1,13 @@
-// controllers/userController.js
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import nodemailer from "nodemailer";
 import { authenticator } from "otplib";
-import OTPStore from "../models/otpStoreModel.js"; // Assuming you have OTP model
+import OTPStore from "../models/otpStoreModel.js";
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -14,6 +16,17 @@ const transporter = nodemailer.createTransport({
     pass: "rybihzjkyajnxdbc",
   },
 });
+
+const __filename = fileURLToPath(import.meta.url);
+
+const __dirname = path.dirname(__filename);
+
+const templatePath = path.join(
+  __dirname,
+  "../templates/otp-email-template.html"
+);
+
+const template = fs.readFileSync(templatePath, "utf-8");
 
 export const registerUser = async (req, res) => {
   const { name, email, password } = req.body;
@@ -35,14 +48,17 @@ export const registerUser = async (req, res) => {
     });
 
     await newUser.save();
+    const emailHtml = template
+      .replace("{{name}}", name)
+      .replace("{{otp}}", otp);
 
     await OTPStore.create({ email, otp });
 
     await transporter.sendMail({
-      from: "matrerajesh.igenerate@gmail.com",
+      from: "Dating",
       to: email,
       subject: "Your OTP Code",
-      text: `Your OTP code is ${otp}. It is valid for 10 minutes.`,
+      html: emailHtml,
     });
 
     const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, {
