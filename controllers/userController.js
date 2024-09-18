@@ -44,9 +44,7 @@ export const registerUser = async (req, res) => {
     });
 
     await newUser.save();
-    const emailHtml = template
-      .replace("{{name}}", name)
-      .replace("{{otp}}", otp);
+    const emailHtml = template.replace("{{otp}}", otp);
 
     await OTPStore.create({ email, otp });
 
