@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import nodemailer from "nodemailer";
+import multer from "multer";
 import { authenticator } from "otplib";
 import OTPStore from "../models/otpStoreModel.js";
 import { sendSuccess, sendError } from "../utils/responseUtil.js";
@@ -30,14 +31,18 @@ export const registerUser = async (req, res) => {
   const { email } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return sendError(res, "User already exists", 400);
+    let user = await User.findOne({ email });
+
+    if (user && user.isVerified) {
+      return sendError(res, "User already exists and is verified", 400);
     }
 
     const otp = authenticator.generate(uuidv4());
-    const newUser = new User({ email });
-    await newUser.save();
+
+    if (!user) {
+      user = new User({ email });
+      await user.save();
+    }
 
     const emailHtml = template.replace("{{otp}}", otp);
     await OTPStore.create({ email, otp });
@@ -49,7 +54,7 @@ export const registerUser = async (req, res) => {
       html: emailHtml,
     });
 
-    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "10m",
     });
 
@@ -220,32 +225,51 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-const saveImage = (base64Image, imageName) => {
-  const uploadsDir = path.join(__dirname, "..", "uploads");
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `image_${Date.now()}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
 
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const fileTypes = /jpeg|jpg|png/;
+    const extname = fileTypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
+    const mimeType = fileTypes.test(file.mimetype);
 
-  const imagePath = path.join(uploadsDir, imageName);
-  const imageBuffer = Buffer.from(base64Image, "base64");
-  fs.writeFileSync(imagePath, imageBuffer);
-  return imagePath;
-};
+    if (extname && mimeType) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed!"));
+    }
+  },
+}).single("image");
 
 export const uploadImage = async (req, res) => {
-  const { image } = req.body;
-
-  if (!image) {
-    return sendError(res, "No image provided", 400);
-  }
-
   try {
-    const imageName = `image_${Date.now()}.png`;
-    const imagePath = saveImage(image, imageName);
+    await new Promise((resolve) => {
+      upload(req, res, (err) => {
+        if (err) {
+          return sendError(res, err.message || "File upload error", 400);
+        }
+        if (!req.file) {
+          return sendError(res, "No image provided", 400);
+        }
+        resolve();
+      });
+    });
 
+    const imagePath = path.join("uploads", req.file.filename);
     sendSuccess(res, { path: imagePath }, "Image uploaded successfully", 200);
   } catch (error) {
-    sendError(res, error);
+    sendError(res, error.message || error, 500);
   }
 };
