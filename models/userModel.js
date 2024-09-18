@@ -14,7 +14,7 @@ const userSchema = new mongoose.Schema({
   bio: { type: String },
   aboutMe: {
     work: { type: String },
-    education: { type: Object },
+    education: { type: String },
     location: { type: String },
     homeTown: { type: String },
     lookingFor: { type: String },
