@@ -13,11 +13,7 @@ export const sendSuccess = (
   });
 };
 
-export const sendError = (
-  res,
-  error = "An error occurred",
-  statusCode = 500
-) => {
+export const sendError = (res, error = "Server error", statusCode = 500) => {
   return res.status(statusCode).json({
     success: false,
     error: error.message || error,
