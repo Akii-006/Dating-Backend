@@ -164,7 +164,8 @@ export const resendOTP = async (req, res) => {
 };
 
 export const updateProfile = async (req, res) => {
-  const token = req.headers.authorization;
+  const token = req.headers.authorization ? req.headers.authorization.replace('Bearer ', '').trim() : null;
+
   const {
     birthDate,
     gender,
