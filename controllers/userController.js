@@ -90,14 +90,19 @@ export const verifyOTP = async (req, res) => {
     await user.save();
     await OTPStore.deleteOne({ email: user.email, otp });
 
-    sendSuccess(res, {}, "OTP verified successfully", 200);
+    const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+    
+    sendSuccess(res, { token: newToken }, "OTP verified successfully", 200);
   } catch (error) {
     if (error.name === "TokenExpiredError") {
       return sendError(res, "Token expired", 400);
     }
-    sendError(res, error);
+    sendError(res, "An error occurred during verification", 500);
   }
 };
+
 
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
