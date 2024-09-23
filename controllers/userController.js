@@ -9,6 +9,7 @@ import nodemailer from "nodemailer";
 import multer from "multer";
 import { authenticator } from "otplib";
 import OTPStore from "../models/otpStoreModel.js";
+import { paginate } from "../utils/paginationUtil.js";
 import { sendSuccess, sendError } from "../utils/responseUtil.js";
 
 const transporter = nodemailer.createTransport({
@@ -93,16 +94,15 @@ export const verifyOTP = async (req, res) => {
     const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
-    
+
     sendSuccess(res, { token: newToken }, "OTP verified successfully", 200);
   } catch (error) {
     if (error.name === "TokenExpiredError") {
       return sendError(res, "Token expired", 400);
     }
-    sendError(res, "An error occurred during verification", 500);
+    sendError(res, error, 500);
   }
 };
-
 
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
@@ -123,7 +123,7 @@ export const loginUser = async (req, res) => {
     });
     sendSuccess(res, { token }, "Login successful", 200);
   } catch (error) {
-    sendError(res, error);
+    sendError(res, error, 500);
   }
 };
 
@@ -159,12 +159,14 @@ export const resendOTP = async (req, res) => {
     if (error.name === "TokenExpiredError") {
       return sendError(res, "Token expired", 400);
     }
-    sendError(res, error);
+    sendError(res, error, 500);
   }
 };
 
 export const updateProfile = async (req, res) => {
-  const token = req.headers.authorization ? req.headers.authorization.replace('Bearer ', '').trim() : null;
+  const token = req.headers.authorization
+    ? req.headers.authorization.replace("Bearer ", "").trim()
+    : null;
 
   const {
     birthDate,
@@ -227,7 +229,7 @@ export const updateProfile = async (req, res) => {
     await user.save();
     sendSuccess(res, {}, "Profile updated successfully", 200);
   } catch (error) {
-    sendError(res, error);
+    sendError(res, error, 500);
   }
 };
 
@@ -277,5 +279,135 @@ export const uploadImage = async (req, res) => {
     sendSuccess(res, { path: imagePath }, "Image uploaded successfully", 200);
   } catch (error) {
     sendError(res, error.message || error, 500);
+  }
+};
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+
+  return distance;
+};
+
+export const getAllUsers = async (req, res) => {
+  const token = req.headers.authorization;
+  const { page = 1, limit = 10, minAge, maxAge, distance } = req.query;
+  const { latitude, longitude } = req.query;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const currentUser = await User.findById(decoded.id);
+
+    if (!currentUser) {
+      return sendError(res, "User not found", 400);
+    }
+
+    let genderFilter = {};
+    if (currentUser.gender === "male") {
+      genderFilter.gender = "female";
+    } else if (currentUser.gender === "female") {
+      genderFilter.gender = "male";
+    } else if (currentUser.gender === "nonbinary") {
+      genderFilter.gender = { $in: ["male", "female"] };
+    }
+
+    const ageFilter = {};
+    const today = new Date();
+
+    if (minAge) {
+      const minBirthDate = new Date(
+        today.setFullYear(today.getFullYear() - minAge)
+      );
+      ageFilter.birthDate = { $lte: minBirthDate };
+    }
+
+    if (maxAge) {
+      const maxBirthDate = new Date(
+        today.setFullYear(today.getFullYear() - maxAge)
+      );
+      ageFilter.birthDate = { ...ageFilter.birthDate, $gte: maxBirthDate };
+    }
+
+    const combinedFilter = { ...genderFilter, ...ageFilter };
+
+    let users = await User.find(combinedFilter);
+
+    if (latitude && longitude && distance) {
+      const filteredUsers = users.filter((user) => {
+        if (user.latitude && user.longitude) {
+          const userDistance = calculateDistance(
+            parseFloat(latitude),
+            parseFloat(longitude),
+            user.latitude,
+            user.longitude
+          );
+          return userDistance <= parseFloat(distance);
+        }
+        return false;
+      });
+
+      users = filteredUsers;
+    }
+
+    const paginatedUsers = users.slice((page - 1) * limit, page * limit);
+    const totalUsers = users.length;
+
+    sendSuccess(
+      res,
+      {
+        users: paginatedUsers,
+        totalUsers,
+        currentPage: page,
+        totalPages: Math.ceil(totalUsers / limit) || 0,
+      },
+      "Users fetched successfully"
+    );
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return sendError(res, "Token expired", 400);
+    }
+    sendError(res, error, 500);
+  }
+};
+
+export const updateLocation = async (req, res) => {
+  const token = req.headers.authorization;
+  const { latitude, longitude } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const currentUser = await User.findById(decoded.id);
+
+    if (!currentUser) {
+      return sendError(res, "User not found", 400);
+    }
+
+    if (latitude) currentUser.latitude = latitude;
+    if (longitude) currentUser.longitude = longitude;
+
+    await currentUser.save();
+
+    sendSuccess(
+      res,
+      { user: currentUser },
+      "Location updated successfully",
+      200
+    );
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return sendError(res, "Token expired", 400);
+    }
+    sendError(res, error, 500);
   }
 };

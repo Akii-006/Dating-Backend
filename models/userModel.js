@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema({
   categorys: [{ type: String }],
   headline: { type: String },
   bio: { type: String },
+  latitude: { type: Number },
+  longitude: { type: Number },
   aboutMe: {
     work: { type: String },
     education: { type: String },
