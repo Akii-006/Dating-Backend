@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
   birthDate: { type: Date },
   gender: { type: String },
   images: [{ type: String }],
-  categorys: [{ type: String }],
+  categories: [{ type: String }],
   headline: { type: String },
   bio: { type: String },
   latitude: { type: Number },
