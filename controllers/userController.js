@@ -11,6 +11,8 @@ import { authenticator } from "otplib";
 import OTPStore from "../models/otpStoreModel.js";
 import { paginate } from "../utils/paginationUtil.js";
 import { sendSuccess, sendError } from "../utils/responseUtil.js";
+// import { v2 as cloudinary } from "cloudinary";
+import cloudinary from "cloudinary";
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -56,7 +58,7 @@ export const registerUser = async (req, res) => {
     });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "10m",
+      expiresIn: "2m",
     });
 
     sendSuccess(
@@ -71,7 +73,7 @@ export const registerUser = async (req, res) => {
 };
 
 export const verifyOTP = async (req, res) => {
-  const { otp, token } = req.body;
+  const { otp, token, password } = req.body;
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -87,17 +89,29 @@ export const verifyOTP = async (req, res) => {
       return sendError(res, "Invalid OTP", 400);
     }
 
+    if (password) {
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(password, salt);
+    }
+
     user.isVerified = true;
     await user.save();
+
     await OTPStore.deleteOne({ email: user.email, otp });
 
     const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
 
-    sendSuccess(res, { token: newToken }, "OTP verified successfully", 200);
+    sendSuccess(
+      res,
+      { token: newToken },
+      "OTP verified and password set successfully",
+      200
+    );
   } catch (error) {
     if (error.name === "TokenExpiredError") {
+      password;
       return sendError(res, "Token expired", 400);
     }
     sendError(res, error, 500);
@@ -233,15 +247,13 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `image_${Date.now()}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,
@@ -275,13 +287,31 @@ export const uploadImage = async (req, res) => {
       });
     });
 
-    const imagePath = path.join("uploads", req.file.filename);
-    sendSuccess(res, { path: imagePath }, "Image uploaded successfully", 200);
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.v2.uploader.upload_stream(
+        { folder: "Dating" },
+        (error, result) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        }
+      );
+
+      uploadStream.end(req.file.buffer);
+    });
+
+    sendSuccess(
+      res,
+      { url: result.secure_url },
+      "Image uploaded successfully",
+      200
+    );
   } catch (error) {
     sendError(res, error.message || error, 500);
   }
 };
-
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
