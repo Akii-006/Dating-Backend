@@ -331,7 +331,9 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 export const getAllUsers = async (req, res) => {
-  const token = req.headers.authorization;
+  const token = req.headers.authorization
+    ? req.headers.authorization.replace("Bearer ", "").trim()
+    : null;
   const { page = 1, limit = 10, minAge, maxAge, distance } = req.query;
   const { latitude, longitude } = req.query;
 
